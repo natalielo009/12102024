@@ -1,0 +1,624 @@
+---
+title: "Regression for apposition"
+author: "Natalia Logvinova"
+date: "12/10/2024"
+output:
+  pdf_document: 
+    toc: yes
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Inroduction
+
+In my work I study case concord conditions in Russian appositional constructions, e.i. in constructions like those from example (1), where the case concord is optional:
+
+(1) a. На островеLOC КритеLOC чтили пещеру <…>
+     b. <…> разорила могучее царство на островеLOC КритNOM
+
+First I load the needed packages.
+
+```{r warning = FALSE, message = FALSE}
+library(tidyverse)
+library(dbplyr)
+library(rms)
+library(lme4)
+library(readxl)
+library(effects) 
+library(vcd)
+library(sjPlot)
+library(ggplot2)
+source("/Users/natalialogvinova/Desktop/helpers/explorer.cat.r")
+source("/Users/natalialogvinova/Desktop/helpers/C.score.r")
+source("/Users/natalialogvinova/Desktop/helpers/explorer.num.r")
+source("/Users/natalialogvinova/Desktop/helpers/R2.r")
+```
+
+Reading the data:
+
+```{r Read the data}
+conc <- read.csv('/Users/natalialogvinova/Desktop/Files/Main work/021222_Concord in Russian apposition/02042023/for_regression_180420223.csv', sep = ';')
+conc$Time_period <- as.factor(conc$Time_period)
+conc$Common_noun <- as.factor(conc$Common_noun)
+conc$Number <-  as.factor(conc$Number)
+conc$Case <-  as.factor(conc$Case)
+conc$Pr_name <- as.factor(conc$Pr_name)
+conc$Construction <- as.factor(conc$Construction)
+conc$X3_ending <- as.factor(conc$X3_ending)
+conc$X1_ending <- as.factor(conc$X1_ending)
+conc$Ending_group <- as.factor(conc$Ending_group)
+conc$Gender <-  as.factor(conc$Gender)
+#conc$Complexity <- as.factor(conc$Complexity)
+conc$Ending_matching <- as.factor(conc$Ending_matching)
+conc$Dec_class_matching <- as.factor(conc$Dec_class_matching)
+conc$Gender_matching <- as.factor(conc$Gender_matching)
+conc$Created <- as.numeric(conc$Created)
+conc$Created_decade <- as.numeric(conc$Created_decade)
+conc$Sphere <- as.factor(conc$Sphere)
+conc$Sphere_short <- as.factor(conc$Sphere_short)
+conc$Result <- as.factor(conc$Result)
+conc$Prop_noun_freq <- as.numeric(conc$Prop_noun_freq)
+head(conc)
+summary(conc)
+```
+
+To improve a future model's fit, I logarithmically transform frequency measurements as is recommended in (Levshina 2016):
+
+```{r Log transformation of the frequency variables}
+conc$Prop_noun_freq <- log(conc$Prop_noun_freq)
+```
+
+
+# 2. Varibales
+
+### The database has 15 435 rows and 26 columns:
+
+**RESUT**  is the DEPENDENT variable, with two values
+  - concord
+  - no_concord
+
+ALL THE OTHER VARIABLES ARE INDEPENDENT:
+
+- **Time_period**: 6 variables; shows the time period to which the text belongs.
+
+- **Common noun**: 7 variables; shows the common noun which participates in the appositional construction (e.i. *river* in the *river Thames*) in the nominative form. A random effect variable.
+
+- **Number**: 1 value; gives the grammatical number of the common noun; is uninformative on this stage.
+
+- **Case**: 5 values; gives the case of the common noun in the actual sentence from the corpus, it is also a "target case" for the proper name.
+
+- **X3_ending**: a lot of values; gives the last 3 letters from the Pr_name string. This factor checks if certain final affixes may influence concord.
+
+- **X1_ending**: a lot of values; gives the last letter from the Pr_name string. This factor is mostly for fun at this stage.
+
+- **Ending_group**: 4 values; divides **X3_ending** into 4 groups of which 3 represnet very common toponymic formants (*-ск*, *-ин*, and *-ов*) and the fourth one is an *other* group.
+
+- **Gender**: 4 values; shows the grammatical gender and plurality in case of *inherently plural* nouns of the proper name.
+
+- **Complexity**: 2 values; shows whether the proper name is simple (e.i. is a one-word name, like *Москва*) or complex (a non-one-word name, like *Нижний Новгород*).
+
+- **Gender_matching**: 2 values; shows whether the grammatical gender of the proper name matches the grammatical gender of the common noun.
+
+- **Dec_class_matching** : 2 values; shows whether the proper name belongs to the same declination paradigm as the common noun. In the majority of cases, the value of this variable is the same as one for **Gender_matching** (for the logical reason that grammatical gender conditions declination paradigm in Russian). However, there is a set of examples, where female proper names after female common nouns have different declination paradigm, as in *о рекЕ обИ*. On the contrary, some neutral proper names show no gender matching with the preceeding common noun while sharing the same declinatiin paradigm with it. This parameter is expected to show what exactly matters in these cases. Unfortunatelly, this is a potential source of multicollinearity. 
+
+- **Author**: a lot of values; it may be useful to check whether the concord depends on the idiolect of the author. 
+- **Created**: a numeric alternative to **Time_period**. Although more precise, this variable is harder to count for my models. 
+
+- **Created_decade**: numeric; a simpler form of **Created** (the last figure is replaced with 0).
+
+- **Sphere**: a lot of values; the functional type of the text.
+
+- **Prop_noun_freq**: numeric; This measure shows how many times the given proper name occured in the sample.
+
+Now I am checking the reference levels of the factors I will explore in my model.
+
+```{r Check the reference levels}
+levels(conc$Time_period)
+levels(conc$Common_noun)
+levels(conc$Case)
+levels(conc$X3_ending)
+levels (conc$Ending_group)
+levels(conc$Gender)
+levels(conc$Complexity)
+levels(conc$Sphere)
+levels(conc$Dec_class_matching)
+levels(conc$Gender_matching)
+```
+
+I will re-level my response variable and some of my predictor variables to make the regression model more interpretable. E.i. I will set the predictor parameters to the levels with presumably default/ less effect.
+
+```{r}
+conc$Result <- relevel(conc$Result, "no_concord")
+#conc$Complexity <- relevel(conc$Complexity, "simple")
+conc$Ending_group <- relevel(conc$Ending_group, "other")
+conc$Common_noun <- relevel(conc$Common_noun, "город")
+conc$Created_decade.z <- as.numeric(scale(conc$Created_decade))
+levels(conc$Result)
+levels(conc$Adjectivity)
+levels(conc$Complexity)
+levels(conc$Ending_group)
+levels(conc$Common_noun)
+```
+```{r}
+max (conc$Created_decade.z)
+```
+
+```{r}
+summary(conc)
+```
+
+
+For the dependent variable, **no_concord** is the reference level and therefore goes in the denominator of the odds ratio: **concord**/**no_concord**.This means that for the logit values of coefficients:
+
+- “+” values mean more **concord**
+- “-” values mean more **no_concord**
+
+# 3. Exploring each predictor variable
+
+Now I will explore all of my predictor variables one by one to decide which of them are worth including in the model.
+
+## 3.1 Result
+
+```{r}
+explorer.cat(conc$Result)
+```
+## 3.2 Time_period
+
+```{r}
+explorer.cat(conc$Time_period)
+```
+```{r}
+Time_Result <- table(conc$Time_period, conc$Result)
+Time_Result
+assocstats(Time_Result)
+```
+As can be seen from the chi-square statistic above, **Time_period** is significantly associated with **Result**, with a small, but reportable effect size. The contingency table reveals a trend for gradual increase of cases with no concord.
+
+ 
+## 3.3 Common noun
+
+```{r}
+explorer.cat(conc$Common_noun)
+```
+```{r}
+Common_Result <- table(conc$Common_noun, conc$Result)
+Common_Result
+assocstats(Common_Result)
+```
+The chi-square statistic above shows that **Common_noun** is significantly associated with **Result**, with a reportable effect size. The contingency table reveals that in constructions with some common nouns the concord is observed in absolute majority of the cases (like *грод*), while with other common nouns there is no such certainty.
+
+## 3.4 Case
+
+```{r}
+explorer.cat(conc$Case)
+```
+```{r}
+Case_Result <- table(conc$Case, conc$Result)
+Case_Result
+assocstats(Case_Result)
+```
+The chi-square statistic again indicates that **Case** is significantly associated with **Result**. However, the size effect is too small to be reported.
+
+## 3.5 Ending
+
+```{r}
+explorer.cat(conc$Ending_group)
+```
+```{r}
+Ending_Result <- table(conc$Ending_group, conc$Result)
+Ending_Result
+assocstats(Ending_Result)
+```
+The effect of the **Case ending** for concord is not statistically significant with the effect size of the reportable level.
+
+## 3.6 Gender
+
+```{r}
+explorer.cat(conc$Gender)
+```
+```{r}
+Gender_Result <- table(conc$Gender, conc$Result)
+Gender_Result
+assocstats(Gender_Result)
+```
+The association between the grammatical **Gender** of the proper name and concord is statistically significant with a moderate effect size.
+
+## 3.7 Gender_matching
+
+```{r}
+explorer.cat(conc$Gender_matching)
+```
+```{r}
+Gender_matching_Result <- table(conc$Gender_matching, conc$Result)
+Gender_matching_Result
+assocstats(Gender_matching_Result)
+```
+As the chi-statistics above indicates, the correlation between **Case_matching** and concord is statistically valid. Note that the effect size of the above correlation is the largest among explored so far. Importantly, this effect is larger than with **Gender** variable. This is an argument in favor of including **Gender_matching** rather than **Gender** in the statisticall model.
+
+```{r}
+Common_noun_Gender_matching_Result <- table(conc$Common_noun, conc$Gender_matching, conc$Result)
+Common_noun_Gender_matching_Result
+assocstats(Common_noun_Gender_matching_Result)
+```
+
+## 3.8 Declination class matching
+
+
+```{r}
+explorer.cat(conc$Dec_class_matching)
+```
+```{r}
+Dec_class_Result <- table(conc$Dec_class_matching, conc$Result)
+Dec_class_Result
+assocstats(Dec_class_Result)
+```
+## 3.9 Ending_matching
+
+```{r}
+Ending_matching_Result <- table(conc$Ending_matching, conc$Result)
+Ending_matching_Result
+assocstats(Ending_matching_Result)
+```
+
+
+Declination class matching is statistically significant for concord. However, the effect size of this association is less than one of the **Gender_matching**.
+
+## OLD 3.9 Adjectivity
+
+```{r}
+explorer.cat(conc$Adjectivity)
+```
+```{r}
+Adjectivity_Result <- table(conc$Adjectivity, conc$Result)
+Adjectivity_Result
+assocstats(Adjectivity_Result)
+```
+The association between **Adjectivity** and concrod is statistically significant, although the effect size is moderate.
+
+**Adjectivity** is however highly assocoated with **Gendder_matching**, since most of the adjectival proper names have the same grammatical gender as their generic common nouns. So I will avoid including both parameters at the same time.
+
+```{r}
+Adjectivity_Gender_matching <-  table(conc$Adjectivity, conc$Gender_matching)
+Adjectivity_Gender_matching
+assocstats(Adjectivity_Gender_matching)
+```
+Looks like the absence of gender matching affects concord probability more dramatically than the adjective namture of the stem:
+
+```{r}
+table(conc$Adjectivity, conc$Gender_matching, conc$Result)
+```
+
+## OLD 3.10 Complexity
+
+```{r}
+explorer.cat(conc$Complexity)
+```
+```{r}
+Complexity_Result <- table(conc$Complexity, conc$Result)
+Complexity_Result
+assocstats(Complexity_Result)
+```
+The correlation between **Complexity** and concord is statistically significant, however the effect size of this variable is too small to be reported. This is an argument for excluding this variable from the primary logistic regression model.
+
+## 3.11 Sphere
+
+```{r}
+explorer.cat(conc$Sphere)
+```
+```{r}
+Sphere_Result <- table(conc$Sphere, conc$Result)
+Sphere_Result
+assocstats(Sphere_Result)
+```
+From the contingency table above it can be judged that the highest percent of constructions without concord can be observed in the everyday speech and technical texts. Although the skew is not that considerable (about 35% of no concord cases in each category). The association thus is statistically significant, while the effect size is below the reportable level.
+
+## 3.12 Frequency
+
+```{r}
+hist(conc$Prop_noun_freq)
+```
+
+# 4. Calculating the baseline
+
+```{r}
+(baseline <- max( # make baseline the highest  
+  prop.table( # proportion in the 
+table(conc$Result)))) # frequency table of the response variable
+```
+
+# 5. The first model
+
+In my first model I will try all the factors that have shown statistical significance and a reportable effect size in the range of tests I applied above. Since **Gender**, **Gender_matching** and to some extent **Dec_class_matching** are interrelated variables, I will only include **Case_matching** as it has a stronger effect size as the other variables.  Thus, my model will include such factors as **Created_decade.z**, **Case**, **Gender_matching**, **Ending_group**, **Construction_freq** and **Common_noun** as a random effect variable.
+
+
+```{r First model}
+summary(model <- glmer(Result ~ 1 + Created_decade.z + Case + Gender_matching + Prop_noun_freq + (1 | Common_noun), family=binomial, data=conc))
+```
+
+With the function below I will check whether some of the parameters that I have put into my primary model worth dropping out. 
+
+```{r}
+drop1(  
+  model,
+test="Chisq")
+```
+
+As follows from the result of the testing, dropping out any of the predictors would increase the AIC measure, so all the predictors are valid for the model.
+
+Below I am checking for multicollinearity in my model. 
+```{r}
+car::vif(model)
+```
+Since all the values of GVIF are not greater than 5, we can expect that there are no collinearity in the model.
+
+Finally, I check the R2 and C-scores of the model:
+
+```{r}
+MuMIn::r.squaredGLMM(model)
+```
+
+```{r}
+C.score(model)
+```
+
+# 6. Other models and comparison
+
+To check how good my model is, I will compare it to the **null model**, a model proposed by Laura and several alternative models.
+
+First, I create a null model:
+
+```{r}
+model_0 <- glmer(Result ~ 1 + (1 | Common_noun), family=binomial, data=conc)
+```
+
+A model suggested by Laura takes somewhat more, but still only 4 parameters in consideration:
+
+```{r}
+summary(model_1 <- glmer(Result ~ 1 + Created_decade.z + Case +  Adjectivity + (1 | Common_noun), family=binomial, data=conc))
+```
+
+An alternative **model_3** will take **Adjectivity** instead of **Gender_matching**:
+```{r}
+model_2 <- glmer(Result ~ 1 + Created_decade.z + Case + Adjectivity +  Ending_group + Prop_noun_freq + (1 | Common_noun), family=binomial, data=conc)
+```
+
+An alternative **model_3** will take **Dec_class_matching** instead of **Gender_matching**:
+```{r}
+model_3 <- glmer(Result ~ 1 + Created_decade.z + Case + Dec_class_matching +  Ending_group +  Prop_noun_freq + (1 | Common_noun), family=binomial, data=conc)
+```
+
+An alternative **model_4** will take **Gender** instead of **Gender_matching**:
+```{r}
+model_4 <- glmer(Result ~ 1 + Created_decade.z + Case + Gender +  Ending_group +   Prop_noun_freq +(1 | Common_noun), family=binomial, data=conc)
+```
+
+An alternative **model_5** will consider the interaction between **Prop_noun_freq** and **Common_noun**:
+```{r}
+model_5 <- glmer(Result ~ 1 + Created_decade.z + Case + Gender_matching +  Ending_group +   Prop_noun_freq*(1 | Common_noun), family=binomial, data=conc)
+```
+
+An alternative **model_6** will consider the interaction between **Gender_matching** and **Prop_noun_freq**:
+```{r}
+summary(model_6 <- glmer(Result ~ 1 + Created_decade.z + Case + Gender_matching*Prop_noun_freq + (1 | Common_noun) +  Ending_group, family=binomial, data=conc))
+```
+
+
+```{r}
+anova(model, model_0, test = "Chisq")
+```
+```{r}
+anova(model, model_1, test = "Chisq")
+```
+```{r}
+anova(model, model_2, test = "Chisq")
+```
+```{r}
+anova(model, model_3, test = "Chisq")
+```
+```{r}
+anova(model, model_4, test = "Chisq")
+```
+```{r}
+anova(model, model_5, test = "Chisq")
+```
+```{r}
+anova(model, model_6, test = "Chisq")
+```
+
+Since **model** decreases the deviance and has smaller AIC and BIC as compared to the **null model** (**model_0**), a model suggested  by Laura (**model_1**) and most of the alternative models, I will treat my initial **model** as superior to all others. **model_5** and **model_6** which take into account interaction between **Gender_matching** and **Common_noun** and **Prop_noun_freq** and **Common_noun** has the same AIC, BIC and deviance, which indicates the interraction of factors does not make a model more effective.
+
+# 7. Evaluating the model
+
+Below I check for the correctness of the **model'**s predictions:
+
+```{r}
+probability = plogis(predict(model))
+tab = table(conc$Result=="concord", probability >= 0.5)
+tab
+```
+The accuracy of the model is:
+
+```{r}
+sum(diag(tab))/sum(tab)
+```
+The **Accuracy** is higher than the **baseline** (0.7328574).
+
+To check whether this difference is statistically significant I conduct the following testing:
+
+```{r}
+sum(diag(tab))
+```
+
+```{r}
+sum(tab)
+```
+
+```{r}
+sum(dbinom(  
+  x=12592:15269,
+size=15269,
+prob=baseline)) 
+```
+The difference is highly statistically significant.
+
+# 8. Interpretation of the model
+
+I interpret the results I got in **model** as follows:
+
+If the intercept conditions are true, the odds of **concord/no_concord** is:
+
+```{r}
+exp(-0.62299)
+```
+This means that in the texts of the last quarter of the 17th century in constructions with the common noun ***город*** and **nominal** Proper name of **different gender** and pretty **low frequency** in **accusative** case the probability of concord was 53% from probability of absence of concord. Thus, the chances of concord and its absence could be 1/2 respectively.
+
+
+## 8.1 Created_decade.z
+
+The intercept for Created_decade.z corresponds to 1680, so the later is the date, the less concord there is.
+
+```{r} 
+(predictions.created <- data.frame( 
+  decade <- effect(
+"Created_decade.z",  
+model)))
+```
+```{r}
+plot(decade, 
+type="response",
+ylim=c(0, 1),
+xlim=c(0, 1),
+grid=TRUE,
+cex.lab=2, cex.axis=2, cex.main=2, cex.sub=2)
+```
+The plot above illustates that with time the probability of concord decreased.
+
+## 8.2 Case
+
+The intercept for Case is accusative. All the other cases show less concord than accusative. Let us explore this result more deeply.
+
+```{r}
+(predictions.case <- data.frame( 
+case <- effects::effect(  
+  "Case", 
+  model)))
+```
+```{r}
+case_plot <- barplot( 
+height=predictions.case$fit, # bar heights: predicted probabilities  
+width=prop.table(table(conc$Case)), # bar widths: frequencies of each level  
+xlab="Case", ylab="Predicted probability of cocnord", names.arg=levels(conc$Case), ylim=c(0, 1)) 
+abline(h=0.5, lty=3) 
+arrows( # draw arrows 
+x0=tab, y0=predictions.case$lower, # from these starting coordinates  
+x1=tab, y1=predictions.case$upper, # to these end coordinates  
+angle=90, code=3) # use 90-degree tips on both sides
+```
+
+```{r}
+conc1 <- df(conc[conc$Gender=='f', ])
+```
+```{r}
+summarise(conc1)
+```
+## 8.3 Gender_matching
+
+* The intercept for Gender_matching is no. So the presence of matching provides more concord. This is what was expected.
+
+```{r}
+(predictions.matching <- data.frame( 
+matching <- effects::effect(  
+  "Gender_matching", 
+  model)))
+```
+```{r}
+matching_plot <- barplot( 
+height=predictions.matching$fit, # bar heights: predicted probabilities  
+width=prop.table(table(conc$Gender_matching)), # bar widths: frequencies of each level  
+xlab="Gender_matching", ylab="Predicted probability of cocnord", names.arg=levels(conc$Gender_matching), ylim=c(0, 1)) 
+abline(h=0.5, lty=3) 
+# note how we use qwe to get the mid points of the bars  
+arrows( # draw arrows 
+x0=tab, y0=predictions.matching$lower, # from these starting coordinates  
+x1=tab, y1=predictions.matching$upper, # to these end coordinates  
+angle=90, code=3) # use 90-degree tips on both sides
+````
+```{r}
+predictions.noun_match <- data.frame( 
+  inter <- effect( 
+"Gender_matching:Prop_noun_freq", 
+model))
+inter
+```
+```{r}
+plot(inter, 
+     type="response",  
+     ylim=c(0, 1),
+grid=TRUE)
+```
+
+
+
+## 8.3 Ending_group
+
+The intercept for Adjectivity is nominal. So, in this case the model expectedly proves the more consistent concord with adjectival stems.
+
+
+```{r}
+(predictions.ending <- data.frame( 
+matching <- effects::effect(  
+  "Ending_group", 
+  model)))
+```
+
+```{r}
+ending_plot <- barplot( 
+height=predictions.ending$fit, # bar heights: predicted probabilities  
+width=prop.table(table(conc$Ending_group)), # bar widths: frequencies of each level  
+xlab="Ending_group", ylab="Predicted probability of concord", names.arg=levels(conc$Ending_group), ylim=c(0, 1)) 
+abline(h=0.5, lty=3) 
+# note how we use qwe to get the mid points of the bars  
+arrows( # draw arrows 
+x0=tab, y0=predictions.ending$lower, # from these starting coordinates  
+x1=tab, y1=predictions.ending$upper, # to these end coordinates  
+angle=90, code=3) # use 90-degree tips on both sides
+```
+
+## 8.4 Frequency
+
+The intercept for Construction_freq is 1. The model logically shows that the greater the frequency, the more consistent is concord (although the statistical significance is not always there).
+
+
+```{r} 
+(predictions.frequency <- data.frame( 
+  freq <- effect(
+"Prop_noun_freq",  
+model)))
+```
+
+```{r}
+plot(freq, 
+type="response",
+ylim=c(0, 1), 
+grid=TRUE)
+```
+## 8.4 Common noun
+
+```{r}
+lattice::dotplot( # create a dot chart  
+  lme4::ranef(model, # of the ranefs of model 
+condVar=TRUE,
+textcex = 10
+)) # include CIs
+```
+
+```{r}
+predictions.cn <- data.frame(
+inter <- effect(
+"Created_decade.z:",
+model_6))
+inter
+```
